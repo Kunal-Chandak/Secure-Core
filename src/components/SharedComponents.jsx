@@ -32,10 +32,10 @@ export const LogoMark = ({ size = "sm" }) => (
 );
 
 /* ── Device ID chip ── */
-export const DeviceId = ({ id }) => (
-  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-    <Icon name="cpu" size={13} color="var(--grey)" />
-    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--grey-dim)", letterSpacing: "0.5px" }}>
+export const DeviceId = ({ id, iconSize = 18, textSize = 12 }) => (
+  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+    <Icon name="fingerprint" size={iconSize} color="var(--grey)" />
+    <span style={{ fontFamily: "var(--font-mono)", fontSize: textSize, color: "var(--white)", fontWeight: 700, letterSpacing: "0.5px" }}>
       {id || "DEV-A4F2-8BC1"}
     </span>
   </div>

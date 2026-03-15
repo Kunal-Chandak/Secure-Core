@@ -1,13 +1,16 @@
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import Icon from "../components/Icon";
 import { LogoMark, DeviceId } from "../components/SharedComponents";
 import { useAppContext } from "../context/AppContext";
 import { loadRecentRooms } from "../utils/recentRooms";
+import { getRoomInfo } from "../api";
 
 const HomeScreen = ({ navigate }) => {
   const { clientId } = useAppContext();
   const [time, setTime] = useState(new Date());
   const [recentRooms, setRecentRooms] = useState([]);
+  const [toast, setToast] = useState({ show: false, msg: "" });
 
   const shortenId = (id) => {
     if (!id) return "";
@@ -31,24 +34,60 @@ const HomeScreen = ({ navigate }) => {
     return `${Math.floor(days / 7)}w ago`;
   };
 
-  const gotoRecentRoom = (code) => {
-    if (!code) return;
-    localStorage.setItem("securecore:prefill_code", code);
+  const gotoRecentRoom = (room) => {
+    if (!room?.code) return;
+    const expiryMs = room?.expiryTimestamp ? new Date(room.expiryTimestamp).getTime() : null;
+    const isExpired = expiryMs ? Date.now() >= expiryMs : false;
+    const isAlive   = room.exists !== false;
+    if (isExpired || !isAlive) return;
+
+    localStorage.setItem("securecore:prefill_code", room.code);
     navigate("join");
+  };
+
+  const Toast = ({ message, show }) => {
+    if (typeof document === "undefined") return null;
+
+    const toast = (
+      <div style={{
+        position: "fixed",
+        bottom: "calc(24px + 68px)",
+        left: "50%",
+        transform: `translateX(-50%) translateY(${show ? 0 : 20}px)`,
+        opacity: show ? 1 : 0,
+        transition: "all 0.3s ease",
+        background: "rgba(255,59,59,0.9)",
+        color: "#fff",
+        fontFamily: "var(--font-mono)",
+        fontSize: 12,
+        letterSpacing: "0.5px",
+        padding: "10px 20px",
+        borderRadius: 10,
+        zIndex: 9999,
+        pointerEvents: "none",
+        whiteSpace: "nowrap",
+      }}>
+        {message}
+      </div>
+    );
+
+    return createPortal(toast, document.body);
   };
 
   const RecentRoomCard = ({ room }) => {
     const expiryMs = room?.expiryTimestamp ? new Date(room.expiryTimestamp).getTime() : null;
-    const isActive = expiryMs ? Date.now() < expiryMs : true;
+    const isExpired = expiryMs ? Date.now() >= expiryMs : false;
+    const isAlive   = room.exists !== false;
+    const isActive  = !isExpired && isAlive;
 
     return (
       <div
-        onClick={() => gotoRecentRoom(room.code)}
+        onClick={() => gotoRecentRoom(room)}
         className="card"
         style={{
           padding: "20px 16px",
           textAlign: "left",
-          cursor: "pointer",
+          cursor: isActive ? "pointer" : "default",
           borderColor: isActive ? "rgba(245,196,0,0.3)" : "rgba(255,59,59,0.3)",
         }}
       >
@@ -96,7 +135,13 @@ const HomeScreen = ({ navigate }) => {
 
   const copyDeviceId = () => {
     if (!clientId) return;
-    navigator.clipboard?.writeText(clientId).catch(() => {});
+    navigator.clipboard?.writeText(clientId).then(() => {
+      setToast({ show: true, msg: "Device ID copied" });
+      setTimeout(() => setToast({ show: false, msg: "" }), 2500);
+    }).catch(() => {
+      setToast({ show: true, msg: "Copy failed" });
+      setTimeout(() => setToast({ show: false, msg: "" }), 2500);
+    });
   };
 
   useEffect(() => {
@@ -105,7 +150,23 @@ const HomeScreen = ({ navigate }) => {
   }, []);
 
   useEffect(() => {
-    setRecentRooms(loadRecentRooms());
+    const rooms = loadRecentRooms();
+    setRecentRooms(rooms);
+
+    // Check whether each room still exists; if not, mark it expired.
+    rooms.forEach((room) => {
+      const expiryMs = room?.expiryTimestamp ? new Date(room.expiryTimestamp).getTime() : null;
+      if (expiryMs && Date.now() >= expiryMs) return; // already expired
+
+      getRoomInfo(room.roomHash)
+        .then(res => {
+          if (!res.success) throw new Error("not found");
+          // still exists; nothing to do
+        })
+        .catch(() => {
+          setRecentRooms(prev => prev.map(r => r.roomHash === room.roomHash ? { ...r, exists: false } : r));
+        });
+    });
   }, []);
 
   const actions = [
@@ -154,11 +215,6 @@ const HomeScreen = ({ navigate }) => {
             <span style={{ color: "var(--green)", fontFamily: "var(--font-mono)", fontSize: 11, letterSpacing: "0.5px" }}>AES-256 ACTIVE</span>
           </div>
           <div style={{ width: 1, height: 24, background: "var(--border)" }} />
-          <div className="status-row">
-            <Icon name="wifi" size={15} color="var(--yellow)" />
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--grey)" }}>WS CONNECTED</span>
-          </div>
-          <div style={{ width: 1, height: 24, background: "var(--border)" }} />
           <button
             onClick={copyDeviceId}
             title={clientId ? "Copy device ID" : ""}
@@ -169,9 +225,10 @@ const HomeScreen = ({ navigate }) => {
               cursor: clientId ? "pointer" : "default",
               display: "flex",
               alignItems: "center",
+              gap: 8,
             }}
           >
-            <DeviceId id={clientId ? shortenId(clientId) : ""} />
+            <DeviceId id={clientId ? shortenId(clientId) : ""} iconSize={20} textSize={13} />
           </button>
         </div>
       </div>
@@ -295,6 +352,8 @@ const HomeScreen = ({ navigate }) => {
           All communications are end-to-end encrypted and ephemeral
         </span>
       </div>
+
+      <Toast message={toast.msg} show={toast.show} />
     </div>
   );
 };

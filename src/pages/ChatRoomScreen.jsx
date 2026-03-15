@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import Icon from "../components/Icon";
 import { useAppContext } from "../context/AppContext";
 import { connectWS } from "../utils/ws";
-import { getRoomMessages, uploadChatFile, downloadChatFile } from "../api";
+import { burnRoom, getRoomInfo, getRoomMessages, uploadChatFile, downloadChatFile } from "../api";
 import {
   base64ToBytes,
   base64ToUtf8,
@@ -14,9 +14,6 @@ import {
   hmacHex,
 } from "../utils/crypto";
 
-/* ─────────────────────────────────────────────
-   HELPERS
-───────────────────────────────────────────── */
 const fmtCountdown = (s) => {
   const h  = Math.floor(s / 3600);
   const m  = Math.floor((s % 3600) / 60);
@@ -38,11 +35,7 @@ const guessMimeType = (fileName) => {
   return map[ext] || "application/octet-stream";
 };
 
-/* ─────────────────────────────────────────────
-   SUB-COMPONENTS
-───────────────────────────────────────────── */
-
-/** Live / offline pill shown in header */
+/* ─── CONNECTION PILL ─── */
 const ConnectionPill = ({ open }) => (
   <div style={{ display:"flex", alignItems:"center", gap:5 }}>
     <div style={{
@@ -60,7 +53,94 @@ const ConnectionPill = ({ open }) => (
   </div>
 );
 
-/** Uploading placeholder bubble */
+/* ─── BURN CONFIRM DIALOG ─── */
+const BurnDialog = ({ onConfirm, onCancel }) => (
+  <div style={{
+    position:"fixed", inset:0, zIndex:999,
+    background:"rgba(0,0,0,0.75)",
+    backdropFilter:"blur(6px)",
+    display:"flex", alignItems:"center", justifyContent:"center",
+    padding:"0 24px",
+    animation:"fadeIn 0.15s ease",
+  }}>
+    <div style={{
+      width:"100%", maxWidth:360,
+      background:"var(--deep-black, #0B0B0B)",
+      border:"1.5px solid rgba(245,196,0,0.6)",
+      borderRadius:20,
+      padding:"24px 24px 28px",
+      boxShadow:"0 0 40px rgba(245,196,0,0.15), 0 20px 60px rgba(0,0,0,0.8)",
+      animation:"scaleIn 0.18s cubic-bezier(0.34,1.56,0.64,1)",
+    }}>
+      {/* Fire icon */}
+      <div style={{ display:"flex", justifyContent:"center", marginBottom:16 }}>
+        <div style={{
+          width:56, height:56, borderRadius:"50%",
+          background:"rgba(255,59,59,0.15)",
+          display:"flex", alignItems:"center", justifyContent:"center",
+        }}>
+          <span style={{ fontSize:28, lineHeight:1 }}>🔥</span>
+        </div>
+      </div>
+
+      {/* Title */}
+      <div style={{
+        textAlign:"center", marginBottom:10,
+        fontFamily:"var(--font-display)", fontWeight:700, fontSize:20,
+        color:"var(--yellow)",
+      }}>
+        Burn Room?
+      </div>
+
+      {/* Body */}
+      <div style={{
+        textAlign:"center", marginBottom:24,
+        fontFamily:"var(--font-body)", fontSize:14, lineHeight:1.5,
+        color:"var(--white)",
+        opacity:0.8,
+      }}>
+        This will permanently destroy the room and all messages. This action cannot be undone.
+      </div>
+
+      {/* Buttons */}
+      <div style={{ display:"flex", gap:12 }}>
+        <button
+          onClick={onCancel}
+          style={{
+            flex:1, padding:"12px 0", borderRadius:12, cursor:"pointer",
+            background:"transparent",
+            border:"1px solid rgba(245,196,0,0.6)",
+            color:"var(--yellow)",
+            fontFamily:"var(--font-display)", fontWeight:600, fontSize:14,
+            transition:"all 0.2s",
+          }}
+          onMouseEnter={e => e.currentTarget.style.background="rgba(245,196,0,0.08)"}
+          onMouseLeave={e => e.currentTarget.style.background="transparent"}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onConfirm}
+          style={{
+            flex:1, padding:"12px 0", borderRadius:12, cursor:"pointer",
+            background:"var(--red, #FF3B3B)",
+            border:"none",
+            color:"#fff",
+            fontFamily:"var(--font-display)", fontWeight:600, fontSize:14,
+            transition:"all 0.2s",
+            boxShadow:"0 4px 18px rgba(255,59,59,0.35)",
+          }}
+          onMouseEnter={e => e.currentTarget.style.opacity="0.88"}
+          onMouseLeave={e => e.currentTarget.style.opacity="1"}
+        >
+          Burn
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
+/* ─── UPLOADING BUBBLE ─── */
 const UploadingBubble = ({ fileName, progress, sent }) => {
   const bg    = sent ? "rgba(0,0,0,0.15)" : "var(--yellow-dim)";
   const acct  = sent ? "#0B0B0B"          : "var(--yellow)";
@@ -103,7 +183,7 @@ const UploadingBubble = ({ fileName, progress, sent }) => {
   );
 };
 
-/** File attachment bubble */
+/* ─── FILE BUBBLE ─── */
 const FileBubble = ({ msg, sent, onDownload, downloading }) => {
   const bg    = sent ? "rgba(0,0,0,0.15)" : "var(--yellow-dim)";
   const acct  = sent ? "#0B0B0B"          : "var(--yellow)";
@@ -115,7 +195,6 @@ const FileBubble = ({ msg, sent, onDownload, downloading }) => {
     <div className={`chat-bubble ${sent ? "sent" : "received"}`}
       style={{ minWidth:220, padding:"12px 14px" }}>
       <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-        {/* Icon */}
         <div style={{
           width:40, height:40, borderRadius:8, flexShrink:0,
           background:bg, border:`1px solid ${sent ? "rgba(0,0,0,0.2)" : "var(--border-hover)"}`,
@@ -123,8 +202,6 @@ const FileBubble = ({ msg, sent, onDownload, downloading }) => {
         }}>
           <Icon name="file" size={18} color={acct} />
         </div>
-
-        {/* Name + label */}
         <div style={{ flex:1, overflow:"hidden", minWidth:0 }}>
           <div style={{
             fontFamily:"var(--font-display)", fontWeight:600, fontSize:13,
@@ -138,8 +215,6 @@ const FileBubble = ({ msg, sent, onDownload, downloading }) => {
             ENCRYPTED FILE
           </div>
         </div>
-
-        {/* Download button */}
         <button
           onClick={() => onDownload(msg.fileId, msg.fileName)}
           disabled={downloading}
@@ -163,7 +238,7 @@ const FileBubble = ({ msg, sent, onDownload, downloading }) => {
   );
 };
 
-/** Image bubble */
+/* ─── IMAGE BUBBLE ─── */
 const ImageBubble = ({ msg, sent, onDownload, downloading }) => {
   const acct   = sent ? "#0B0B0B" : "var(--yellow)";
   const btnBg  = sent ? "rgba(0,0,0,0.12)" : "rgba(255,255,255,0.05)";
@@ -173,7 +248,6 @@ const ImageBubble = ({ msg, sent, onDownload, downloading }) => {
   return (
     <div className={`chat-bubble ${sent ? "sent" : "received"}`}
       style={{ padding:8, minWidth:200 }}>
-
       {msg.previewUrl ? (
         <img
           src={msg.previewUrl}
@@ -193,8 +267,6 @@ const ImageBubble = ({ msg, sent, onDownload, downloading }) => {
           </span>
         </div>
       )}
-
-      {/* View / Save row */}
       <button
         onClick={() => onDownload(msg.fileId, msg.fileName)}
         disabled={downloading}
@@ -217,7 +289,7 @@ const ImageBubble = ({ msg, sent, onDownload, downloading }) => {
   );
 };
 
-/** Attach popover menu */
+/* ─── ATTACH MENU ─── */
 const AttachMenu = ({ onFile, onImage, onClose }) => (
   <>
     <div onClick={onClose} style={{ position:"fixed", inset:0, zIndex:9 }} />
@@ -235,7 +307,6 @@ const AttachMenu = ({ onFile, onImage, onClose }) => (
       }}>
         // ATTACH
       </div>
-
       {[
         { icon:"camera", label:"Photo / Camera", action:onImage },
         { icon:"file",   label:"Choose File",    action:onFile  },
@@ -250,14 +321,8 @@ const AttachMenu = ({ onFile, onImage, onClose }) => (
             fontFamily:"var(--font-body)", fontSize:14,
             cursor:"pointer", transition:"all 0.15s", textAlign:"left",
           }}
-          onMouseEnter={e => {
-            e.currentTarget.style.background = "var(--yellow-dim)";
-            e.currentTarget.style.color      = "var(--yellow)";
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.background = "transparent";
-            e.currentTarget.style.color      = "var(--white)";
-          }}
+          onMouseEnter={e => { e.currentTarget.style.background="var(--yellow-dim)"; e.currentTarget.style.color="var(--yellow)"; }}
+          onMouseLeave={e => { e.currentTarget.style.background="transparent"; e.currentTarget.style.color="var(--white)"; }}
         >
           <div style={{
             width:30, height:30, borderRadius:6,
@@ -273,7 +338,7 @@ const AttachMenu = ({ onFile, onImage, onClose }) => (
   </>
 );
 
-/** Slim upload progress strip above the input */
+/* ─── UPLOAD BAR ─── */
 const UploadBar = ({ progress }) => (
   <div style={{ marginBottom:8 }}>
     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
@@ -297,7 +362,7 @@ const UploadBar = ({ progress }) => (
   </div>
 );
 
-/** Empty state shown when there are no messages yet */
+/* ─── EMPTY STATE ─── */
 const EmptyState = () => (
   <div style={{
     flex:1, display:"flex", flexDirection:"column",
@@ -326,7 +391,8 @@ const EmptyState = () => (
    MAIN COMPONENT
 ───────────────────────────────────────────── */
 const ChatRoomScreen = ({ navigate }) => {
-  const { clientId, room } = useAppContext();
+  const { clientId, room, setRoom, settings } = useAppContext();
+  const { messageTimestamps, showSenderIds } = settings;
 
   const [messages,        setMessages]        = useState([]);
   const [input,           setInput]           = useState("");
@@ -337,6 +403,8 @@ const ChatRoomScreen = ({ navigate }) => {
   const [downloadingFiles,setDownloadingFiles]= useState({});
   const [showAttachMenu,  setShowAttachMenu]  = useState(false);
   const [roomKey,         setRoomKey]         = useState(null);
+  const [showBurnDialog,  setShowBurnDialog]  = useState(false);
+  const expirationCheckTimerRef = useRef(null);
 
   const shortenId = (id) => {
     if (!id) return "";
@@ -357,36 +425,24 @@ const ChatRoomScreen = ({ navigate }) => {
       if (!raw) return [];
       const parsed = JSON.parse(raw);
       return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
+    } catch { return []; }
   };
 
   const persistMessages = (roomHash, msgs) => {
     try {
       const toStore = msgs.map((m) => ({
-        id: m.id,
-        type: m.type,
-        text: m.text,
-        fileId: m.fileId,
-        fileName: m.fileName,
-        sent: m.sent,
-        senderId: m.senderId,
-        time: m.time,
+        id: m.id, type: m.type, text: m.text, fileId: m.fileId,
+        fileName: m.fileName, sent: m.sent, senderId: m.senderId, time: m.time,
       }));
       localStorage.setItem(`securecore:messages:${roomHash}`, JSON.stringify(toStore));
-    } catch {
-      // ignore
-    }
+    } catch {}
   };
 
-  /* cleanup blob URLs */
   useEffect(() => {
     const cache = fileUrlCacheRef.current;
     return () => { cache.forEach(URL.revokeObjectURL); cache.clear(); };
   }, []);
 
-  /* derive room key */
   useEffect(() => {
     let cancelled = false;
     if (!room?.code || !room?.roomSalt) return setRoomKey(null);
@@ -396,7 +452,6 @@ const ChatRoomScreen = ({ navigate }) => {
     return () => { cancelled = true; };
   }, [room?.code, room?.roomSalt]);
 
-  /* countdown */
   useEffect(() => {
     if (!room?.roomHash) { navigate("home"); return; }
     const expiry = () => {
@@ -409,27 +464,50 @@ const ChatRoomScreen = ({ navigate }) => {
     return () => clearInterval(t);
   }, [room, navigate]);
 
-  /* load cached messages quickly (optimistic UI) */
+  useEffect(() => {
+    if (expirationCheckTimerRef.current) {
+      clearTimeout(expirationCheckTimerRef.current);
+      expirationCheckTimerRef.current = null;
+    }
+
+    if (!room?.roomHash || seconds > 0) return;
+
+    const checkRoom = async () => {
+      try {
+        await getRoomInfo(room.roomHash);
+        // If room still exists, retry again later until it is removed.
+        expirationCheckTimerRef.current = setTimeout(checkRoom, 10000);
+      } catch (err) {
+        setRoom(null);
+        navigate("home");
+      }
+    };
+
+    checkRoom();
+
+    return () => {
+      if (expirationCheckTimerRef.current) {
+        clearTimeout(expirationCheckTimerRef.current);
+        expirationCheckTimerRef.current = null;
+      }
+    };
+  }, [seconds, room?.roomHash, getRoomInfo, navigate, setRoom]);
+
   useEffect(() => {
     if (!room?.roomHash) return;
     const cached = getCachedMessages(room.roomHash);
-    if (cached.length) {
-      setMessages(cached);
-    }
+    if (cached.length) setMessages(cached);
   }, [room?.roomHash]);
 
-  /* persist messages so re-entering room restores them instantly */
   useEffect(() => {
     if (!room?.roomHash) return;
     persistMessages(room.roomHash, messages);
   }, [room?.roomHash, messages]);
 
-  /* decrypt + cache a file */
   const downloadAndDecryptFile = useCallback(async (fileId, fileName) => {
     if (!roomKey) throw new Error("Room key not available");
     if (fileUrlCacheRef.current.has(fileId)) return fileUrlCacheRef.current.get(fileId);
     if (fileDownloadPromisesRef.current.has(fileId)) return fileDownloadPromisesRef.current.get(fileId);
-
     const p = (async () => {
       const res = await downloadChatFile(fileId, room?.roomHash);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -441,35 +519,32 @@ const ChatRoomScreen = ({ navigate }) => {
       fileUrlCacheRef.current.set(fileId, url);
       return url;
     })();
-
     fileDownloadPromisesRef.current.set(fileId, p);
     try { return await p; } finally { fileDownloadPromisesRef.current.delete(fileId); }
   }, [room?.roomHash, roomKey]);
 
-  /* websocket */
   useEffect(() => {
     if (!room?.roomHash || !roomKey) return;
     const ws = connectWS();
     wsRef.current = ws;
-
     ws.onopen = () => {
       setWsOpen(true);
       ws.send(JSON.stringify({ type:"join_room", roomHash:room.roomHash, senderId:clientId }));
     };
-
     ws.onmessage = async (ev) => {
       try {
         const data = JSON.parse(ev.data);
-
+        if (data.type === "room_burnt") {
+          setRoom(null);
+          navigate("home");
+          return;
+        }
         if ((data.type === "image" || data.type === "file") && data.senderId) {
           const fileId = data.fileId || data.imageId;
           const newMsg = {
             id: data.msgId || fileId || Date.now(),
-            type: data.type,
-            fileId,
-            fileName: data.fileName,
-            senderId: data.senderId,
-            sent: data.senderId === clientId,
+            type: data.type, fileId, fileName: data.fileName,
+            senderId: data.senderId, sent: data.senderId === clientId,
             time: new Date().toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" }),
             uploading: false,
           };
@@ -484,7 +559,6 @@ const ChatRoomScreen = ({ navigate }) => {
             .catch(() => {});
           return;
         }
-
         if (data.ciphertext && data.senderId) {
           if (data.senderId === clientId) return;
           const text = await decryptMessage(roomKey, data.ciphertext, data.iv, data.authTag);
@@ -492,22 +566,34 @@ const ChatRoomScreen = ({ navigate }) => {
             id: data.msgId || Date.now(),
             senderId: data.senderId,
             text: text || "(unable to decrypt)",
-            type: "text",
-            sent: false,
-            time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            type: "text", sent: false,
+            time: new Date().toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" }),
           }]);
         }
       } catch (err) { console.error("WS parse error", err); }
     };
-
     ws.onerror  = () => setWsOpen(false);
     ws.onclose  = () => setWsOpen(false);
     return () => { setWsOpen(false); ws.close(); };
   }, [room?.roomHash, roomKey, clientId, downloadAndDecryptFile]);
 
-  /* load history */
   useEffect(() => {
     if (!room?.roomHash || !roomKey) return;
+
+    // Ensure we have the latest room metadata (creatorId, expiry) so UI elements like burn button are accurate
+    (async () => {
+      try {
+        const info = await getRoomInfo(room.roomHash);
+        if (info.success) {
+          setRoom(prev => ({
+            ...prev,
+            creatorId: info.creator_id,
+            expiryTimestamp: info.expiry_timestamp,
+          }));
+        }
+      } catch { /* ignore */ }
+    })();
+
     (async () => {
       try {
         const res = await getRoomMessages(room.roomHash);
@@ -527,11 +613,9 @@ const ChatRoomScreen = ({ navigate }) => {
         }));
         const reversed = loaded.reverse();
         setMessages((prev) => {
-          // Preserve cached messages if the server returns nothing.
           if (prev.length && reversed.length === 0) return prev;
           return reversed;
         });
-
         reversed.forEach(msg => {
           if ((msg.type==="file"||msg.type==="image") && msg.fileId) {
             downloadAndDecryptFile(msg.fileId, msg.fileName)
@@ -542,14 +626,12 @@ const ChatRoomScreen = ({ navigate }) => {
         });
       } catch (err) { console.error("Failed to load messages", err); }
     })();
-  }, [room?.roomHash, roomKey, clientId, downloadAndDecryptFile]);
+  }, [room?.roomHash, roomKey, clientId, downloadAndDecryptFile, getRoomInfo, setRoom]);
 
-  /* auto-scroll */
   useEffect(() => {
     messagesEnd.current?.scrollIntoView({ behavior:"smooth" });
   }, [messages]);
 
-  /* send text */
   const send = async () => {
     setShowAttachMenu(false);
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) { alert("Not connected"); return; }
@@ -560,29 +642,40 @@ const ChatRoomScreen = ({ navigate }) => {
     const hmac = await hmacHex(roomKey, `${ciphertext}${iv}${authTag}`);
     wsRef.current.send(JSON.stringify({ roomHash:room.roomHash, senderId:clientId, ciphertext, iv, authTag, hmac }));
     setMessages(prev => [...prev, {
-      id: Date.now(),
-      senderId: clientId,
-      text: input,
-      sent: true,
-      type: "text",
+      id: Date.now(), senderId: clientId, text: input,
+      sent: true, type: "text",
       time: `${now.getHours()}:${String(now.getMinutes()).padStart(2, "0")}`,
     }]);
     setInput("");
   };
 
-  /* send file */
+  const handleBurnRoom = async () => {
+    if (!room?.roomHash) return;
+    try {
+      const res = await burnRoom(room.roomHash, clientId);
+      if (res.success) {
+        wsRef.current?.close();
+        setRoom(null);
+        navigate("home");
+      } else {
+        alert("Unable to burn room: " + (res.error || "unknown"));
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error burning room: " + (err?.message || err));
+    }
+  };
+
   const handleFileSelected = async (e, isImage) => {
     const file = e.target?.files?.[0];
     if (!file) return;
     e.target.value = null;
     setShowAttachMenu(false);
     if (!roomKey) { alert("Room key not available"); return; }
-
     setUploadingFile(true);
     setUploadProgress(0);
     const timer = setInterval(() =>
       setUploadProgress(p => Math.min(95, p + Math.random() * 12)), 120);
-
     try {
       const buffer = await file.arrayBuffer();
       const { ciphertext, iv, authTag } = await encryptBuffer(roomKey, buffer);
@@ -595,20 +688,14 @@ const ChatRoomScreen = ({ navigate }) => {
       form.append("iv",        iv);
       form.append("authTag",   authTag);
       form.append("hmac",      hmac);
-
       const res = await uploadChatFile(form);
       if (!res.success || !res.fileId) throw new Error(res.error || "Upload failed");
-
       const now = new Date();
       const fileId = res.fileId;
       setMessages(prev => [...prev, {
-        id:fileId,
-        senderId: clientId,
+        id:fileId, senderId: clientId,
         type: isImage ? "image" : "file",
-        fileId,
-        fileName:file.name,
-        sent:true,
-        uploading:true,
+        fileId, fileName:file.name, sent:true, uploading:true,
         time:`${now.getHours()}:${String(now.getMinutes()).padStart(2,"0")}`,
       }]);
       wsRef.current.send(JSON.stringify({
@@ -625,7 +712,6 @@ const ChatRoomScreen = ({ navigate }) => {
     }
   };
 
-  /* download file */
   const handleDownloadFile = async (fileId, fileName) => {
     try {
       setDownloadingFiles(p => ({ ...p, [fileId]:true }));
@@ -647,11 +733,15 @@ const ChatRoomScreen = ({ navigate }) => {
      RENDER
   ────────────────────────────────────────── */
   return (
-    <div style={{
-      position:"fixed", inset:0,
-      display:"flex", flexDirection:"column",
-      zIndex:2,
-    }}>
+    <div style={{ position:"fixed", inset:0, display:"flex", flexDirection:"column", zIndex:2 }}>
+
+      {/* BURN DIALOG */}
+      {showBurnDialog && (
+        <BurnDialog
+          onConfirm={() => { setShowBurnDialog(false); handleBurnRoom(); }}
+          onCancel={() => setShowBurnDialog(false)}
+        />
+      )}
 
       {/* ══ HEADER ══ */}
       <div style={{
@@ -662,7 +752,6 @@ const ChatRoomScreen = ({ navigate }) => {
         flexShrink:0,
         position:"relative",
       }}>
-        {/* yellow top accent */}
         <div style={{
           position:"absolute", top:0, left:0, right:0, height:2,
           background:"linear-gradient(90deg, transparent, var(--yellow), transparent)",
@@ -679,8 +768,6 @@ const ChatRoomScreen = ({ navigate }) => {
             <button className="back-btn" onClick={() => navigate("home")}>
               <Icon name="arrowLeft" size={18} />
             </button>
-
-            {/* Room avatar */}
             <div style={{
               width:38, height:38, borderRadius:10, flexShrink:0,
               background:"var(--yellow-dim)",
@@ -689,7 +776,6 @@ const ChatRoomScreen = ({ navigate }) => {
             }}>
               <Icon name="lock" size={17} color="var(--yellow)" className="enc-lock" />
             </div>
-
             <div>
               <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:2 }}>
                 <span style={{
@@ -708,23 +794,55 @@ const ChatRoomScreen = ({ navigate }) => {
             </div>
           </div>
 
-          {/* Right: timer */}
-          <div style={{
-            display:"flex", flexDirection:"column", alignItems:"flex-end",
-            background: seconds < 300 ? "rgba(255,59,59,0.08)" : "var(--card2)",
-            border:`1px solid ${seconds < 300 ? "rgba(255,59,59,0.25)" : "var(--border)"}`,
-            borderRadius:8, padding:"6px 12px",
-            transition:"all 0.4s",
-          }}>
-            <span style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--grey)", letterSpacing:"1px", marginBottom:1 }}>
-              EXPIRES
-            </span>
-            <div
-              className={`timer-display ${seconds < 300 ? "urgent" : ""}`}
-              style={{ fontSize:18, letterSpacing:"2px" }}
-            >
-              {fmtCountdown(seconds)}
+          {/* Right: timer + burn */}
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            {/* Timer */}
+            <div style={{
+              display:"flex", flexDirection:"column", alignItems:"flex-end",
+              background: seconds < 300 ? "rgba(255,59,59,0.08)" : "var(--card2)",
+              border:`1px solid ${seconds < 300 ? "rgba(255,59,59,0.25)" : "var(--border)"}`,
+              borderRadius:8, padding:"6px 12px",
+              transition:"all 0.4s",
+            }}>
+              <span style={{ fontFamily:"var(--font-mono)", fontSize:9, color:"var(--grey)", letterSpacing:"1px", marginBottom:1 }}>
+                EXPIRES
+              </span>
+              <div
+                className={`timer-display ${seconds < 300 ? "urgent" : ""}`}
+                style={{ fontSize:18, letterSpacing:"2px" }}
+              >
+                {fmtCountdown(seconds)}
+              </div>
             </div>
+
+            {/* Burn button — creator only */}
+            {room?.creatorId === clientId && (
+              <button
+                onClick={() => setShowBurnDialog(true)}
+                title="Burn room"
+                style={{
+                  width:42, height:42, borderRadius:10, border:"none",
+                  background:"rgba(255,59,59,0.10)",
+                  outline:"1px solid rgba(255,59,59,0.28)",
+                  cursor:"pointer",
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  transition:"all 0.2s",
+                  flexShrink:0,
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.background = "rgba(255,59,59,0.22)";
+                  e.currentTarget.style.outline    = "1px solid rgba(255,59,59,0.55)";
+                  e.currentTarget.style.boxShadow  = "0 0 14px rgba(255,59,59,0.3)";
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = "rgba(255,59,59,0.10)";
+                  e.currentTarget.style.outline    = "1px solid rgba(255,59,59,0.28)";
+                  e.currentTarget.style.boxShadow  = "none";
+                }}
+              >
+                <span style={{ fontSize:20, lineHeight:1 }}>🔥</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -748,21 +866,17 @@ const ChatRoomScreen = ({ navigate }) => {
               alignItems: m.sent ? "flex-end" : "flex-start",
             }}
           >
-            {/* sender id for others */}
-            {!m.sent && m.senderId && (
+            {!m.sent && m.senderId && showSenderIds && (
               <div style={{ marginBottom: 4 }}>
                 <span style={{
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 10,
-                  color: "var(--grey)",
-                  letterSpacing: "0.5px",
+                  fontFamily:"var(--font-mono)", fontSize:10,
+                  color:"var(--grey)", letterSpacing:"0.5px",
                 }}>
                   {shortenId(m.senderId)}
                 </span>
               </div>
             )}
 
-            {/* bubble switcher */}
             {m.uploading && (m.type === "file" || m.type === "image")
               ? <UploadingBubble fileName={m.fileName} progress={uploadProgress} sent={m.sent} />
               : m.type === "image"
@@ -772,15 +886,16 @@ const ChatRoomScreen = ({ navigate }) => {
                   : <div className={`chat-bubble ${m.sent ? "sent" : "received"}`}>{m.text}</div>
             }
 
-            {/* timestamp row */}
             <div style={{
               display:"flex", alignItems:"center", gap:5, marginTop:5,
               flexDirection: m.sent ? "row-reverse" : "row",
             }}>
               <Icon name="lock" size={9} color="var(--green)" className="enc-lock" />
-              <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--grey-dim)" }}>
-                {m.time}
-              </span>
+              {messageTimestamps && (
+                <span style={{ fontFamily:"var(--font-mono)", fontSize:10, color:"var(--grey-dim)" }}>
+                  {m.time}
+                </span>
+              )}
             </div>
           </div>
         ))}
@@ -795,16 +910,11 @@ const ChatRoomScreen = ({ navigate }) => {
         padding:"12px 16px",
         paddingBottom:"calc(12px + env(safe-area-inset-bottom, 0px))",
         backdropFilter:"blur(16px)",
-        flexShrink:0,
-        zIndex:101,
-        position:"relative",
+        flexShrink:0, zIndex:101, position:"relative",
       }}>
         <div style={{ maxWidth:480, margin:"0 auto" }}>
-
-          {/* upload progress strip */}
           {uploadingFile && <UploadBar progress={uploadProgress} />}
 
-          {/* input row */}
           <div style={{ position:"relative" }}>
             {showAttachMenu && (
               <AttachMenu
@@ -821,7 +931,6 @@ const ChatRoomScreen = ({ navigate }) => {
               borderRadius:50, padding:"7px 7px 7px 7px",
               transition:"border-color 0.3s",
             }}>
-              {/* Attach */}
               <button
                 onClick={() => setShowAttachMenu(v => !v)}
                 style={{
@@ -838,7 +947,6 @@ const ChatRoomScreen = ({ navigate }) => {
                 <Icon name="paperclip" size={16} color={showAttachMenu ? "var(--yellow)" : "var(--grey)"} />
               </button>
 
-              {/* Text */}
               <input
                 style={{
                   flex:1, background:"none", border:"none", outline:"none",
@@ -852,7 +960,6 @@ const ChatRoomScreen = ({ navigate }) => {
                 disabled={!wsOpen}
               />
 
-              {/* Send */}
               <button
                 onClick={send}
                 disabled={!wsOpen || !input.trim()}
@@ -870,7 +977,6 @@ const ChatRoomScreen = ({ navigate }) => {
               </button>
             </div>
 
-            {/* offline warning */}
             {!wsOpen && (
               <div style={{
                 marginTop:7, textAlign:"center",
@@ -882,7 +988,6 @@ const ChatRoomScreen = ({ navigate }) => {
             )}
           </div>
 
-          {/* hidden inputs */}
           <input ref={fileInputRef}  type="file"                           style={{ display:"none" }} onChange={e => handleFileSelected(e, false)} />
           <input ref={imageInputRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={e => handleFileSelected(e, true)} />
         </div>

@@ -1,17 +1,15 @@
 const NAV_PAGES = [
-  { id: "home",     label: "Home" },
-  { id: "create",   label: "Create Room" },
-  { id: "join",     label: "Join Room" },
-  { id: "filedrop", label: "File Drop" },
-  { id: "receive",  label: "Receive Files" },
+  { id: "home",      label: "Home" },
+  { id: "create",    label: "Create Room" },
+  { id: "join",      label: "Join Room" },
+  { id: "settings",  label: "Settings" },
+  { id: "userguide", label: "User Guide" },
+  { id: "filedrop",  label: "File Drop" },
+  { id: "receive",   label: "Receive Files" },
 ];
 
-// Pages where the DemoNav should be completely hidden
-// (they manage their own bottom bar / are full-screen layouts)
-const NAV_HIDDEN_PAGES = new Set(["chat", "roomcreated", "fileready", "404"]);
-
-const DemoNav = ({ current, navigate }) => {
-  if (NAV_HIDDEN_PAGES.has(current)) return null;
+const NavBar = ({ current, navigate, hidden = new Set() }) => {
+  if (hidden.has(current)) return null;
 
   return (
     <div style={{
@@ -65,4 +63,4 @@ const DemoNav = ({ current, navigate }) => {
   );
 };
 
-export default DemoNav;
+export default NavBar;

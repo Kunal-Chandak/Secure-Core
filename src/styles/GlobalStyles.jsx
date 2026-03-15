@@ -25,6 +25,18 @@ const GlobalStyles = () => (
       --radius: 14px;
       --radius-sm: 8px;
       --transition: 0.25s cubic-bezier(0.4,0,0.2,1);
+      --text-scale: 1;
+    }
+
+    :root[data-theme="light"] {
+      --bg: #F2F2F5;
+      --card: #FFFFFF;
+      --card2: #F9F9FA;
+      --border: rgba(0,0,0,0.08);
+      --border-hover: rgba(0,0,0,0.16);
+      --grey: #4C4C4C;
+      --grey-dim: #747474;
+      --white: #0B0B0B;
     }
 
     html, body, #root {
@@ -34,6 +46,15 @@ const GlobalStyles = () => (
       font-family: var(--font-body);
       -webkit-font-smoothing: antialiased;
       overflow-x: hidden;
+      font-size: calc(16px * var(--text-scale));
+      zoom: var(--text-scale);
+    }
+
+    @supports not (zoom: 1) {
+      body {
+        transform: scale(var(--text-scale));
+        transform-origin: top center;
+      }
     }
 
     ::-webkit-scrollbar { width: 4px; }

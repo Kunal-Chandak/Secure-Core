@@ -6,6 +6,19 @@ import { v4 as uuidv4 } from "uuid";
 // Mirrors the Flutter app's "device_id" storage key.
 const STORAGE_KEY = "device_id";
 
+const SETTINGS_KEY = (key) => `securecore:setting:${key}`;
+const readSetting = (key, fallback) => {
+  try {
+    const v = localStorage.getItem(SETTINGS_KEY(key));
+    return v === null ? fallback : v;
+  } catch {
+    return fallback;
+  }
+};
+const writeSetting = (key, value) => {
+  try { localStorage.setItem(SETTINGS_KEY(key), value); } catch {};
+};
+
 function genId() {
   try {
     // Prefer a proper UUID
@@ -38,7 +51,37 @@ export function AppProvider({ children }) {
   const [room, setRoom] = useState(null);
   const [drop, setDrop] = useState(null);
 
-  const value = useMemo(() => ({ clientId, room, setRoom, drop, setDrop }), [clientId, room, drop]);
+  const [settings, setSettings] = useState(() => ({
+    darkMode: readSetting("dark_mode", "true") !== "false",
+    textSize: readSetting("text_size", "medium"),
+    messageTimestamps: readSetting("message_timestamps", "true") !== "false",
+    showSenderIds: readSetting("show_sender_ids", "true") !== "false",
+  }));
+
+  const setDarkMode = (next) => {
+    setSettings(prev => ({ ...prev, darkMode: next }));
+    writeSetting("dark_mode", String(next));
+  };
+
+  const setTextSize = (next) => {
+    setSettings(prev => ({ ...prev, textSize: next }));
+    writeSetting("text_size", next);
+  };
+
+  const setMessageTimestamps = (next) => {
+    setSettings(prev => ({ ...prev, messageTimestamps: next }));
+    writeSetting("message_timestamps", String(next));
+  };
+
+  const setShowSenderIds = (next) => {
+    setSettings(prev => ({ ...prev, showSenderIds: next }));
+    writeSetting("show_sender_ids", String(next));
+  };
+
+  const value = useMemo(() => ({
+    clientId, room, setRoom, drop, setDrop,
+    settings, setDarkMode, setTextSize, setMessageTimestamps, setShowSenderIds,
+  }), [clientId, room, drop, settings]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

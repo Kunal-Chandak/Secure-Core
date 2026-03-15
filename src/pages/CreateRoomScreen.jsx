@@ -4,6 +4,7 @@ import { TerminalLoader, SecurityNotice } from "../components/SharedComponents";
 import { useAppContext } from "../context/AppContext";
 import { createRoom } from "../api";
 import { generateRoomFields, randomCode } from "../utils/crypto";
+import { addRecentRoom } from "../utils/recentRooms";
 
 const TIMERS = [
   { val: "10m", label: "10 MIN" },
@@ -62,7 +63,9 @@ const CreateRoomScreen = ({ navigate }) => {
         roomSalt: res.room_salt,
         expiryTimestamp: Date.now() + (res.expiry || expirySeconds) * 1000,
         roomType,
+        creatorId: clientId,
       });
+      addRecentRoom({ code, roomHash: res.room_hash, expiryTimestamp: Date.now() + (res.expiry || expirySeconds) * 1000 });
 
       navigate("roomcreated");
     } catch (err) {

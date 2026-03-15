@@ -1,4 +1,7 @@
-const BASE = import.meta.env.VITE_API_BASE_URL || '';
+// Use a configured backend URL when provided, otherwise fall back to the known production backend.
+// In dev mode we keep an empty base so that Vite proxy (configured in vite.config.js) can forward requests.
+const DEFAULT_BACKEND = "https://secure-core-backend.onrender.com";
+const BASE = import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? DEFAULT_BACKEND : "");
 
 async function post(path, body, isForm=false) {
   const opts = { method: 'POST' };

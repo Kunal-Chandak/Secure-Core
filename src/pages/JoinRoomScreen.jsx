@@ -1,7 +1,8 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import Icon from "../components/Icon";
 import { joinRoom } from "../api";
 import { useAppContext } from "../context/AppContext";
+import { addRecentRoom } from "../utils/recentRooms";
 
 const JoinRoomScreen = ({ navigate }) => {
   const [digits,   setDigits]   = useState(["", "", "", "", "", ""]);
@@ -33,6 +34,14 @@ const JoinRoomScreen = ({ navigate }) => {
     }
   };
 
+  useEffect(() => {
+    const prefill = localStorage.getItem("securecore:prefill_code");
+    if (prefill && /^[0-9]{6}$/.test(prefill)) {
+      setDigits(prefill.split("").concat(Array(6).fill("")).slice(0, 6));
+      localStorage.removeItem("securecore:prefill_code");
+    }
+  }, []);
+
   const handleJoin = async () => {
     const code = digits.join("");
     if (code.length !== 6) return;
@@ -52,6 +61,7 @@ const JoinRoomScreen = ({ navigate }) => {
         creatorId: res.creator_id,
       });
 
+      addRecentRoom({ code, roomHash: res.room_hash, expiryTimestamp: res.expiry_timestamp });
       navigate("chat");
     } catch (err) {
       console.error("Join failed", err);

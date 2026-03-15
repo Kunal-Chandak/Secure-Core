@@ -2,15 +2,96 @@ import { useState, useEffect } from "react";
 import Icon from "../components/Icon";
 import { LogoMark, DeviceId } from "../components/SharedComponents";
 import { useAppContext } from "../context/AppContext";
+import { loadRecentRooms } from "../utils/recentRooms";
 
 const HomeScreen = ({ navigate }) => {
   const { clientId } = useAppContext();
   const [time, setTime] = useState(new Date());
+  const [recentRooms, setRecentRooms] = useState([]);
 
   const shortenId = (id) => {
     if (!id) return "";
     if (id.length < 8) return id;
     return `${id.slice(0, 3)}-${id.slice(id.length - 6, id.length - 4)}-${id.slice(id.length - 2)}`;
+  };
+
+  const getTimeAgo = (timestamp) => {
+    if (!timestamp) return "";
+    const then = new Date(timestamp);
+    const now = new Date();
+    const diff = now.getTime() - then.getTime();
+    const seconds = Math.floor(diff / 1000);
+    if (seconds < 60) return "Just now";
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days}d ago`;
+    return `${Math.floor(days / 7)}w ago`;
+  };
+
+  const gotoRecentRoom = (code) => {
+    if (!code) return;
+    localStorage.setItem("securecore:prefill_code", code);
+    navigate("join");
+  };
+
+  const RecentRoomCard = ({ room }) => {
+    const expiryMs = room?.expiryTimestamp ? new Date(room.expiryTimestamp).getTime() : null;
+    const isActive = expiryMs ? Date.now() < expiryMs : true;
+
+    return (
+      <div
+        onClick={() => gotoRecentRoom(room.code)}
+        className="card"
+        style={{
+          padding: "20px 16px",
+          textAlign: "left",
+          cursor: "pointer",
+          borderColor: isActive ? "rgba(245,196,0,0.3)" : "rgba(255,59,59,0.3)",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{
+              width: 44,
+              height: 44,
+              background: isActive ? "rgba(245,196,0,0.15)" : "rgba(255,59,59,0.15)",
+              borderRadius: 12,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}>
+              <Icon name={isActive ? "history" : "lockClock"} size={22} color={isActive ? "var(--yellow)" : "var(--red)"} />
+            </div>
+            <div>
+              <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 14, color: "var(--white)" }}>
+                Room #{room.code}
+              </div>
+              <div style={{ fontFamily: "var(--font-body)", fontSize: 12, color: "var(--grey)", marginTop: 2 }}>
+                {getTimeAgo(room.joinedAt)}
+              </div>
+            </div>
+          </div>
+          <div style={{
+            padding: "8px 10px",
+            borderRadius: 8,
+            background: isActive ? "rgba(245,196,0,0.15)" : "rgba(255,59,59,0.15)",
+          }}>
+            <span style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: 0.5,
+              color: isActive ? "var(--yellow)" : "var(--red)",
+            }}>
+              {isActive ? "ACTIVE" : "EXPIRED"}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const copyDeviceId = () => {
@@ -21,6 +102,10 @@ const HomeScreen = ({ navigate }) => {
   useEffect(() => {
     const t = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    setRecentRooms(loadRecentRooms());
   }, []);
 
   const actions = [
@@ -145,6 +230,62 @@ const HomeScreen = ({ navigate }) => {
             )}
           </button>
         ))}
+      </div>
+
+      {/* ── Recent Activities ── */}
+      <div style={{ width: "100%", maxWidth: 480, marginTop: 32 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--grey)", letterSpacing: "1.5px", fontWeight: 700 }}>
+            RECENT ACTIVITIES
+          </div>
+          {recentRooms.length > 0 && (
+            <button
+              onClick={() => {
+                localStorage.removeItem("recent_rooms");
+                setRecentRooms([]);
+              }}
+              style={{
+                border: "none",
+                background: "transparent",
+                color: "var(--grey)",
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                cursor: "pointer",
+                padding: "4px 8px",
+              }}
+            >
+              CLEAR
+            </button>
+          )}
+        </div>
+
+        {recentRooms.length === 0 ? (
+          <div
+            style={{
+              width: "100%",
+              padding: "24px",
+              borderRadius: 12,
+              border: "1px solid rgba(255,255,255,0.08)",
+              background: "rgba(255,255,255,0.03)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+              <Icon name="history" size={18} color="var(--grey)" />
+              <span style={{ fontFamily: "var(--font-body)", fontSize: 13, color: "var(--grey)" }}>
+                No recent rooms yet
+              </span>
+            </div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--grey-dim)" }}>
+              Create or join a room to see it here.
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {recentRooms.map((room) => (
+              <RecentRoomCard key={room.roomHash} room={room} />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Footer */}

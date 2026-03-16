@@ -46,6 +46,35 @@ export function createFileDrop(dropHash, duration) {
 export function uploadFileDrop(formData) {
   return post('/file-drop/upload', formData, true);
 }
+
+export function uploadFileDropWithProgress(formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${BASE}/file-drop/upload`);
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch (err) {
+          reject(err);
+        }
+      } else {
+        reject(new Error(`HTTP ${xhr.status}: ${xhr.responseText}`));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('Network error'));
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && typeof onProgress === 'function') {
+        onProgress(event.loaded / event.total);
+      }
+    };
+
+    xhr.send(formData);
+  });
+}
 export function validateDrop(dropHash) {
   return post('/file-drop/validate', { dropHash });
 }

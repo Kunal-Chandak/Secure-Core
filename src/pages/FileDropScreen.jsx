@@ -2,7 +2,7 @@ import { useState } from "react";
 import Icon from "../components/Icon";
 import { SecurityNotice } from "../components/SharedComponents";
 import { useAppContext } from "../context/AppContext";
-import { createFileDrop, uploadFileDrop } from "../api";
+import { createFileDrop, uploadFileDropWithProgress } from "../api";
 import { randomCode, sha256, randomBase64 } from "../utils/crypto";
 
 const fmtSize = (b) => b > 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${(b / 1e3).toFixed(0)} KB`;
@@ -57,13 +57,10 @@ const FileDropScreen = ({ navigate }) => {
       form.append("authTag", randomBase64(16));
       form.append("hmac", randomBase64(32));
 
-      // simulate progress while uploading
-      const progressInterval = setInterval(() => {
-        setProgress((p) => Math.min(95, p + Math.random() * 12));
-      }, 150);
-
-      const uploadRes = await uploadFileDrop(form);
-      clearInterval(progressInterval);
+      // upload the file with real progress feedback
+      const uploadRes = await uploadFileDropWithProgress(form, (fraction) => {
+        setProgress(Math.round(fraction * 100));
+      });
       setProgress(100);
 
       if (!uploadRes.success) {

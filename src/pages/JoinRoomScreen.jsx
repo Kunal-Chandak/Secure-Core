@@ -1,13 +1,13 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import jsQR from "jsqr/dist/jsQR";
 import Icon from "../components/Icon";
 import { joinRoom } from "../api";
 import { useAppContext } from "../context/AppContext";
 import { addRecentRoom } from "../utils/recentRooms";
 
 const JoinRoomScreen = ({ navigate }) => {
-  const [digits,   setDigits]   = useState(["", "", "", "", "", ""]);
-  const [scanning, setScanning] = useState(false);
-  const [joining,  setJoining]  = useState(false);
+  const [digits, setDigits] = useState(["", "", "", "", "", ""]);
+  const [joining, setJoining] = useState(false);
   const inputRefs = useRef([]);
   const { setRoom } = useAppContext();
 
@@ -41,7 +41,89 @@ const JoinRoomScreen = ({ navigate }) => {
       localStorage.removeItem("securecore:prefill_code");
     }
   }, []);
+  const setDigitsFromCode = (raw) => {
+    if (!raw) return null;
 
+    // Some QR payloads are JSON objects (mobile app), while others are raw codes.
+    // Prefer JSON parsing to support cross-platform compatibility.
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed?.type === "secure_room" && typeof parsed?.code === "string") {
+        raw = parsed.code;
+      }
+    } catch {
+      // Not JSON; fall back to raw string
+    }
+
+    const digitsOnly = raw.replace(/\D/g, "").slice(0, 6);
+    if (digitsOnly.length !== 6) return null;
+    const arr = digitsOnly.split("").concat(Array(6).fill(""))?.slice(0, 6);
+    setDigits(arr);
+    return digitsOnly;
+  };
+
+  const joinWithCode = useCallback(async (code) => {
+    const digitsOnly = setDigitsFromCode(code);
+    if (!digitsOnly) return;
+
+    setJoining(true);
+    try {
+      const res = await joinRoom(digitsOnly);
+      if (!res.success) throw new Error(res.error || "Invalid room code");
+
+      setRoom({
+        code: res.room_code || digitsOnly,
+        roomHash: res.room_hash,
+        roomSalt: res.room_salt,
+        expiryTimestamp: res.expiry_timestamp,
+        creatorId: res.creator_id,
+      });
+
+      addRecentRoom({ code: digitsOnly, roomHash: res.room_hash, expiryTimestamp: res.expiry_timestamp });
+      navigate("chat");
+    } catch (err) {
+      console.error("Join failed", err);
+      alert("Unable to join room: " + (err.message || err));
+    } finally {
+      setJoining(false);
+    }
+  }, [navigate, setRoom]);
+
+
+  const handleUpload = async (file) => {
+    if (!file) return;
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const img = new Image();
+      img.src = dataUrl;
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+      });
+
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height);
+      if (code?.data) {
+        handleScannedCode(code.data);
+      } else {
+        alert("No QR code found in image.");
+      }
+    } catch (err) {
+      console.error("QR upload error", err);
+      alert("Unable to read QR image.");
+    }
+  };
   const handleJoin = async () => {
     const code = digits.join("");
     if (code.length !== 6) return;
@@ -89,7 +171,7 @@ const JoinRoomScreen = ({ navigate }) => {
           Join <span className="text-yellow">Secure Room</span>
         </h2>
         <p className="text-grey" style={{ fontSize: 14, marginBottom: 32 }}>
-          Enter your 6-digit access code or scan QR
+          Enter your 6-digit access code or upload QR
         </p>
 
         {/* ── Code input ── */}
@@ -122,33 +204,19 @@ const JoinRoomScreen = ({ navigate }) => {
           }}>OR</span>
         </div>
 
-        {/* ── QR options ── */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 28 }}>
-
-          {/* Scan */}
-          <div
-            className="card"
-            style={{ padding: "20px 16px", textAlign: "center", cursor: "pointer", borderColor: scanning ? "var(--yellow)" : "var(--border)" }}
-            onClick={() => setScanning(s => !s)}
-          >
-            <div style={{
-              width: 48, height: 48,
-              background: scanning ? "var(--yellow-dim)" : "var(--card2)",
-              border: `1px solid ${scanning ? "rgba(245,196,0,0.5)" : "var(--border)"}`,
-              borderRadius: "50%",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              margin: "0 auto 12px",
-              animation: scanning ? "qrPulse 1.5s ease-in-out infinite" : "none",
-            }}>
-              <Icon name="camera" size={22} color={scanning ? "var(--yellow)" : "var(--grey)"} />
-            </div>
-            <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 14, marginBottom: 4 }}>Scan QR</div>
-            <div style={{ fontFamily: "var(--font-body)", fontSize: 12, color: "var(--grey)" }}>Camera scanner</div>
-          </div>
-
-          {/* Upload */}
+        {/* ── QR upload ── */}
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 28 }}>
           <label className="card" style={{ padding: "20px 16px", textAlign: "center", cursor: "pointer" }}>
-            <input type="file" accept="image/*" style={{ display: "none" }} />
+            <input
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleUpload(file);
+                e.target.value = "";
+              }}
+            />
             <div style={{ width: 48, height: 48, background: "var(--card2)", border: "1px solid var(--border)", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
               <Icon name="upload" size={22} color="var(--grey)" />
             </div>
@@ -156,26 +224,6 @@ const JoinRoomScreen = ({ navigate }) => {
             <div style={{ fontFamily: "var(--font-body)", fontSize: 12, color: "var(--grey)" }}>From gallery</div>
           </label>
         </div>
-
-        {/* ── Scanner viewport ── */}
-        {scanning && (
-          <div style={{ marginBottom: 24, textAlign: "center" }}>
-            <div style={{ background: "var(--card2)", border: "2px solid var(--yellow)", borderRadius: 12, padding: 24, position: "relative" }}>
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--yellow)", marginBottom: 8 }}>SCANNING...</div>
-              <div style={{ width: "100%", height: 180, background: "var(--card)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", position: "relative", overflow: "hidden" }}>
-                <Icon name="qr" size={60} color="rgba(245,196,0,0.3)" />
-                <div style={{
-                  position: "absolute", left: 0, right: 0, height: 2,
-                  background: "linear-gradient(90deg, transparent, var(--yellow), transparent)",
-                  animation: "scanLine 2s ease-in-out infinite",
-                }} />
-              </div>
-              <div style={{ marginTop: 10, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--grey)" }}>
-                Point camera at QR code
-              </div>
-            </div>
-          </div>
-        )}
 
         <button
           className="btn-primary"

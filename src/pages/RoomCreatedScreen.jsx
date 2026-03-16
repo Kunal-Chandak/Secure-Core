@@ -101,7 +101,7 @@ const RoomCreatedScreen = ({ navigate }) => {
         <div className="card" style={{ padding: "24px 20px", marginBottom: 20, textAlign: "center" }}>
           <div className="label" style={{ justifyContent: "center", marginBottom: 16 }}>QR Code</div>
           <div style={{ display: "flex", justifyContent: "center" }}>
-            <QRCode value={room?.code || ""} />
+            <QRCode value={JSON.stringify({ type: "secure_room", code: room?.code || "" })} />
           </div>
         </div>
 

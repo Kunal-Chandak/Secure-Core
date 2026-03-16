@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import Icon from "../components/Icon";
 import { LogoMark, DeviceId } from "../components/SharedComponents";
@@ -6,10 +6,40 @@ import { useAppContext } from "../context/AppContext";
 import { loadRecentRooms } from "../utils/recentRooms";
 import { getRoomInfo } from "../api";
 
+const Toast = ({ message, show }) => {
+  if (typeof document === "undefined") return null;
+
+  const toast = (
+    <div style={{
+      position: "fixed",
+      bottom: "calc(24px + 68px)",
+      left: "50%",
+      transform: `translateX(-50%) translateY(${show ? 0 : 20}px)`,
+      opacity: show ? 1 : 0,
+      transition: "all 0.3s ease",
+      background: "rgba(255,59,59,0.9)",
+      color: "#fff",
+      fontFamily: "var(--font-mono)",
+      fontSize: 12,
+      letterSpacing: "0.5px",
+      padding: "10px 20px",
+      borderRadius: 10,
+      zIndex: 9999,
+      pointerEvents: "none",
+      whiteSpace: "nowrap",
+    }}>
+      {message}
+    </div>
+  );
+
+  return createPortal(toast, document.body);
+};
+
 const HomeScreen = ({ navigate }) => {
   const { clientId } = useAppContext();
   const [time, setTime] = useState(new Date());
-  const [recentRooms, setRecentRooms] = useState([]);
+  const [recentRooms, setRecentRooms] = useState(() => loadRecentRooms());
+  const initialRoomsRef = useRef(recentRooms);
   const [toast, setToast] = useState({ show: false, msg: "" });
 
   const shortenId = (id) => {
@@ -43,35 +73,6 @@ const HomeScreen = ({ navigate }) => {
 
     localStorage.setItem("securecore:prefill_code", room.code);
     navigate("join");
-  };
-
-  const Toast = ({ message, show }) => {
-    if (typeof document === "undefined") return null;
-
-    const toast = (
-      <div style={{
-        position: "fixed",
-        bottom: "calc(24px + 68px)",
-        left: "50%",
-        transform: `translateX(-50%) translateY(${show ? 0 : 20}px)`,
-        opacity: show ? 1 : 0,
-        transition: "all 0.3s ease",
-        background: "rgba(255,59,59,0.9)",
-        color: "#fff",
-        fontFamily: "var(--font-mono)",
-        fontSize: 12,
-        letterSpacing: "0.5px",
-        padding: "10px 20px",
-        borderRadius: 10,
-        zIndex: 9999,
-        pointerEvents: "none",
-        whiteSpace: "nowrap",
-      }}>
-        {message}
-      </div>
-    );
-
-    return createPortal(toast, document.body);
   };
 
   const RecentRoomCard = ({ room }) => {
@@ -150,11 +151,8 @@ const HomeScreen = ({ navigate }) => {
   }, []);
 
   useEffect(() => {
-    const rooms = loadRecentRooms();
-    setRecentRooms(rooms);
-
     // Check whether each room still exists; if not, mark it expired.
-    rooms.forEach((room) => {
+    initialRoomsRef.current.forEach((room) => {
       const expiryMs = room?.expiryTimestamp ? new Date(room.expiryTimestamp).getTime() : null;
       if (expiryMs && Date.now() >= expiryMs) return; // already expired
 

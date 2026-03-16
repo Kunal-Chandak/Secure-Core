@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import QRCodeLib from "qrcode";
 import Icon from "./Icon";
 
 /* ── Logo ── */
@@ -96,34 +97,55 @@ export const SecurityNotice = ({ text }) => (
 
 /* ── QR Code visual ── */
 export const QRCode = ({ value = "SECURE-CORE" }) => {
-  const size = 13;
-  const seed = value.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+  const [src, setSrc] = useState("");
 
-  const cells = [];
-  for (let r = 0; r < size; r++) {
-    for (let c = 0; c < size; c++) {
-      const inFinder =
-        (r < 3 && c < 3) || (r < 3 && c > size - 4) || (r > size - 4 && c < 3);
-      const val = inFinder || (r * 31 + c * 17 + seed) % 3 === 0;
-      cells.push({ r, c, v: val });
+  useEffect(() => {
+    let active = true;
+    if (!value) {
+      // Avoid synchronous setState inside effect by deferring to next microtask
+      Promise.resolve().then(() => {
+        if (!active) return;
+        setSrc("");
+      });
+      return () => {
+        active = false;
+      };
     }
-  }
+
+    QRCodeLib.toDataURL(value, { margin: 1, width: 160 })
+      .then((url) => {
+        if (!active) return;
+        setSrc(url);
+      })
+      .catch(() => {
+        if (!active) return;
+        setSrc("");
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [value]);
 
   return (
     <div className="qr-container">
-      <svg width="140" height="140" viewBox={`0 0 ${size * 10 + 10} ${size * 10 + 10}`}>
-        <rect width="100%" height="100%" fill="white" />
-        {cells.map(({ r, c, v }) =>
-          v ? <rect key={`${r}-${c}`} x={c * 10 + 5} y={r * 10 + 5} width="9" height="9" fill="#0B0B0B" rx="1" /> : null
+      <div style={{
+        width: 140,
+        height: 140,
+        borderRadius: 14,
+        background: "white",
+        padding: 10,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        boxShadow: "0 0 0 1px rgba(255,255,255,0.08)",
+      }}>
+        {src ? (
+          <img src={src} alt="QR code" style={{ width: "100%", height: "100%" }} />
+        ) : (
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--grey)" }}>Generating QR…</div>
         )}
-        {[[0, 0], [0, 10], [10, 0]].map(([rx, ry], i) => (
-          <g key={i}>
-            <rect x={rx + 5}  y={ry + 5}  width="25" height="25" fill="#0B0B0B" rx="3" />
-            <rect x={rx + 8}  y={ry + 8}  width="19" height="19" fill="white"   rx="2" />
-            <rect x={rx + 11} y={ry + 11} width="13" height="13" fill="#0B0B0B" rx="2" />
-          </g>
-        ))}
-      </svg>
+      </div>
     </div>
   );
 };

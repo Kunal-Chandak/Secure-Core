@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import Icon from "../components/Icon";
+import { QRCode } from "../components/SharedComponents";
 import { useAppContext } from "../context/AppContext";
-import { downloadFileDrop } from "../api";
 
 const fmtExpiry = (s) => {
   const h = Math.floor(s / 3600);
@@ -11,9 +11,7 @@ const fmtExpiry = (s) => {
 
 const FileReadyScreen = ({ navigate }) => {
   const { drop } = useAppContext();
-  const [seconds,     setSeconds]     = useState(0);
-  const [downloading, setDownloading] = useState(false);
-  const [progress,    setProgress]    = useState(0);
+  const [seconds, setSeconds] = useState(0);
 
   useEffect(() => {
     if (!drop?.expiryTimestamp) {
@@ -38,40 +36,6 @@ const FileReadyScreen = ({ navigate }) => {
     return () => clearInterval(t);
   }, [drop, navigate]);
 
-  const handleDownload = async () => {
-    if (!drop?.fileId || !drop?.dropHash) return;
-
-    setDownloading(true);
-    setProgress(0);
-
-    const progTimer = setInterval(() => {
-      setProgress(p => Math.min(99, p + Math.random() * 12));
-    }, 120);
-
-    try {
-      const res = await downloadFileDrop(drop.fileId, drop.dropHash);
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-      const blob = await res.blob();
-      const fileName = res.headers.get("x-file-filename") || drop.fileName || "secure-file.bin";
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      setProgress(100);
-    } catch (err) {
-      console.error("Download failed", err);
-      alert("Download failed: " + (err.message || err));
-    } finally {
-      clearInterval(progTimer);
-      setDownloading(false);
-    }
-  };
 
   return (
     <div className="page">
@@ -95,27 +59,33 @@ const FileReadyScreen = ({ navigate }) => {
           File <span className="text-yellow">Ready</span>
         </h2>
         <p className="text-grey" style={{ fontSize: 14, marginBottom: 12 }}>
-          Decryption complete. Download your secure file below.
+          Share this QR code or code with the recipient so they can download the file on another device.
         </p>
         {drop?.code && (
-          <div style={{ marginBottom: 20 }}>
-            <div className="label" style={{ marginBottom: 6 }}>Drop Code</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div className="code-display" style={{ gap: 6 }}>
-                {drop.code.split("").map((d, i) => (
-                  <div key={i} className="code-digit" style={{ width: 32, height: 44, lineHeight: "44px" }}>
-                    {d}
-                  </div>
-                ))}
+          <>
+            <div style={{ marginBottom: 16 }}>
+              <div className="label" style={{ marginBottom: 6 }}>Drop Code</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div className="code-display" style={{ gap: 6 }}>
+                  {drop.code.split("").map((d, i) => (
+                    <div key={i} className="code-digit" style={{ width: 32, height: 44, lineHeight: "44px" }}>
+                      {d}
+                    </div>
+                  ))}
+                </div>
+                <button className="btn-icon" onClick={() => {
+                  navigator.clipboard?.writeText(drop.code);
+                  alert("Drop code copied");
+                }}>
+                  <Icon name="copy" size={15} />
+                </button>
               </div>
-              <button className="btn-icon" onClick={() => {
-                navigator.clipboard?.writeText(drop.code);
-                alert("Drop code copied");
-              }}>
-                <Icon name="copy" size={15} />
-              </button>
             </div>
-          </div>
+
+            <div style={{ marginBottom: 24, display: "flex", justifyContent: "center" }}>
+              <QRCode value={JSON.stringify({ type: "secure_drop", code: drop.code })} />
+            </div>
+          </>
         )}
 
         {/* ── File detail card ── */}
@@ -157,38 +127,6 @@ const FileReadyScreen = ({ navigate }) => {
           </div>
         </div>
 
-        {/* ── Download states ── */}
-        {progress === 100 ? (
-          <div style={{
-            background: "rgba(0,230,118,0.08)",
-            border: "1px solid rgba(0,230,118,0.25)",
-            borderRadius: 10, padding: 16, marginBottom: 20,
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center" }}>
-              <Icon name="check" size={20} color="var(--green)" />
-              <span style={{ fontFamily: "var(--font-display)", fontWeight: 700, color: "var(--green)" }}>
-                DOWNLOAD COMPLETE
-              </span>
-            </div>
-          </div>
-        ) : downloading ? (
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--yellow)" }}>DOWNLOADING...</span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--grey)" }}>{Math.round(progress)}%</span>
-            </div>
-            <div className="progress-bar">
-              <div className="progress-fill" style={{ width: `${progress}%` }} />
-            </div>
-          </div>
-        ) : (
-          <button className="btn-primary" onClick={handleDownload} style={{ marginBottom: 12 }}>
-            <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-              <Icon name="download" size={18} color="#0B0B0B" />
-              DOWNLOAD FILE
-            </span>
-          </button>
-        )}
 
         <button className="btn-secondary" onClick={() => navigate("home")}>
           <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>

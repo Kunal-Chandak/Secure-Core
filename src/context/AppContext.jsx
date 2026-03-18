@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useMemo, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 
 // Persisted device identifier (used as senderId for encrypted chat messages)
@@ -78,10 +78,31 @@ export function AppProvider({ children }) {
     writeSetting("show_sender_ids", String(next));
   };
 
+  const [alert, setAlert] = useState({ show: false, message: "", type: "error" });
+  const alertTimeoutRef = useRef(null);
+
+  const hideAlert = () => {
+    if (alertTimeoutRef.current) {
+      clearTimeout(alertTimeoutRef.current);
+      alertTimeoutRef.current = null;
+    }
+    setAlert(prev => ({ ...prev, show: false }));
+  };
+
+  const showAlert = (message, type = "error") => {
+    if (alertTimeoutRef.current) {
+      clearTimeout(alertTimeoutRef.current);
+      alertTimeoutRef.current = null;
+    }
+    setAlert({ show: true, message, type });
+    alertTimeoutRef.current = setTimeout(() => setAlert(prev => ({ ...prev, show: false })), 2800);
+  };
+
   const value = useMemo(() => ({
     clientId, room, setRoom, drop, setDrop,
     settings, setDarkMode, setTextSize, setMessageTimestamps, setShowSenderIds,
-  }), [clientId, room, drop, settings]);
+    alert, showAlert, hideAlert,
+  }), [clientId, room, drop, settings, alert]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

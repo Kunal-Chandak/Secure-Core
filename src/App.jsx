@@ -5,7 +5,7 @@ import { useAppContext } from "./context/AppContext";
 import GlobalStyles from "./styles/GlobalStyles";
 
 // Components
-import NavBar from "./components/NavBar";
+// NavBar removed per request; navigation is handled inside screens via navigate() prop.
 
 // Pages
 import HomeScreen        from "./pages/HomeScreen";
@@ -65,9 +65,6 @@ const SCREENS = {
   settings:    SettingsScreen,
 };
 
-// Pages hidden from the nav bar
-const NAV_HIDDEN = new Set(["roomcreated", "chat", "fileready", "404"]);
-
 const parsePath = (path) => {
   const clean = String(path || "").replace(/^\//, "").replace(/\/$/, "");
   if (!clean) return "home";
@@ -123,11 +120,6 @@ export default function App() {
       </div>
 
       {/* Navigation (5 items — hidden pages excluded) */}
-      <NavBar
-        current={page}
-        navigate={navigate}
-        hidden={NAV_HIDDEN}
-      />
     </>
   );
 }

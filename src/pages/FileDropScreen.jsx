@@ -1,11 +1,22 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Icon from "../components/Icon";
 import { SecurityNotice } from "../components/SharedComponents";
 import { useAppContext } from "../context/AppContext";
 import { createFileDrop, uploadFileDropWithProgress } from "../api";
-import { randomCode, sha256, randomBase64 } from "../utils/crypto";
+import { randomCode, sha256, deriveDropKey, encryptBuffer, hmacHex, base64ToBytes } from "../utils/crypto";
 
 const fmtSize = (b) => b > 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${(b / 1e3).toFixed(0)} KB`;
+
+const formatDuration = (minutes) => {
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const mins = minutes % 60;
+  const parts = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (mins > 0) parts.push(`${mins}m`);
+  return parts.length > 0 ? parts.join(" ") : "0m";
+};
 
 const FileDropScreen = ({ navigate }) => {
   const [dragover,   setDragover]   = useState(false);
@@ -14,8 +25,25 @@ const FileDropScreen = ({ navigate }) => {
   const [uploading,  setUploading]  = useState(false);
   const [done,       setDone]       = useState(false);
   const [duration,   setDuration]   = useState("1h");
-  const [customTime, setCustomTime] = useState("");
+  const [showCustomDialog, setShowCustomDialog] = useState(false);
+  const [customMinutes, setCustomMinutes] = useState(10);
+  const [dialogDays, setDialogDays] = useState(0);
+  const [dialogHours, setDialogHours] = useState(0);
+  const [dialogMinutes, setDialogMinutes] = useState(10);
   const { setDrop } = useAppContext();
+
+  useEffect(() => {
+    if (!showCustomDialog) return;
+
+    const totalMinutes = customMinutes || 0;
+    const days = Math.floor(totalMinutes / 1440);
+    const hours = Math.floor((totalMinutes % 1440) / 60);
+    const minutes = totalMinutes % 60;
+
+    setDialogDays(days);
+    setDialogHours(hours);
+    setDialogMinutes(minutes);
+  }, [showCustomDialog, customMinutes]);
 
   const handleFile = (f) => {
     setFile(f);
@@ -41,21 +69,41 @@ const FileDropScreen = ({ navigate }) => {
 
     try {
       // create drop session
-      const durationValue = duration === "custom" ? `${parseInt(customTime, 10) || 10}m` : duration;
+      const totalMinutes = duration === "custom"
+        ? customMinutes
+        : duration === "10m"
+          ? 10
+          : duration === "1h"
+            ? 60
+            : duration === "24h"
+              ? 24 * 60
+              : 10;
+      const durationValue = `${totalMinutes}m`;
       const createRes = await createFileDrop(dropHash, durationValue);
       if (!createRes.success) {
         throw new Error(createRes.error || "Failed to create drop");
       }
 
-      // upload the file
+      // Encrypt file using the same method as the mobile app (AES-GCM + PBKDF2 key derivation)
+      const dropKey = await deriveDropKey(dropCode);
+      const rawFile = await file.arrayBuffer();
+      const { ciphertext, iv, authTag } = await encryptBuffer(dropKey, rawFile);
+
+      // HMAC over ciphertext+iv+authTag (all base64) for integrity (matches mobile behavior)
+      const hmac = await hmacHex(dropKey, `${ciphertext}${iv}${authTag}`);
+
+      // Upload encrypted file bytes
+      const encryptedBytes = base64ToBytes(ciphertext);
+      const encryptedBlob = new Blob([encryptedBytes], { type: "application/octet-stream" });
+
       const form = new FormData();
       form.append("dropHash", dropHash);
-      form.append("file", file);
+      form.append("file", encryptedBlob, file.name);
       form.append("fileName", file.name);
       form.append("fileSize", String(file.size));
-      form.append("iv", randomBase64(12));
-      form.append("authTag", randomBase64(16));
-      form.append("hmac", randomBase64(32));
+      form.append("iv", iv);
+      form.append("authTag", authTag);
+      form.append("hmac", hmac);
 
       // upload the file with real progress feedback
       const uploadRes = await uploadFileDropWithProgress(form, (fraction) => {
@@ -75,6 +123,9 @@ const FileDropScreen = ({ navigate }) => {
         fileId: uploadRes.fileId,
         fileName: file.name,
         fileSize: file.size,
+        iv,
+        authTag,
+        isReceiver: false,
       });
 
       setDone(true);
@@ -113,24 +164,139 @@ const FileDropScreen = ({ navigate }) => {
         <div style={{ marginBottom: 24 }}>
           <div className="label">Self-destruct duration</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {["10m", "1h", "24h", "custom"].map((opt) => (
-              <button
-                key={opt}
-                className={`timer-pill ${duration === opt ? "active" : ""}`}
-                onClick={() => setDuration(opt)}
-              >
-                {opt === "10m" ? "10 min" : opt === "1h" ? "1 hour" : opt === "24h" ? "24 hours" : "custom"}
-              </button>
-            ))}
+            {["10m", "1h", "24h", "custom"].map((opt) => {
+              const label = opt === "10m" ? "10 min"
+                : opt === "1h" ? "1 hour"
+                : opt === "24h" ? "24 hours"
+                : duration === "custom" ? formatDuration(customMinutes) : "Custom";
+
+              return (
+                <button
+                  key={opt}
+                  className={`timer-pill ${duration === opt ? "active" : ""}`}
+                  onClick={() => {
+                    if (opt === "custom") {
+                      setDuration("custom");
+                      setShowCustomDialog(true);
+                    } else {
+                      setDuration(opt);
+                    }
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
-          {duration === "custom" && (
+
+          {showCustomDialog && (
+            <div style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.6)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+              zIndex: 9999,
+            }}>
+              <div style={{
+                width: "100%",
+                maxWidth: 460,
+                background: "var(--bg)",
+                border: "1px solid var(--border)",
+                borderRadius: 16,
+                padding: 20,
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                  <div style={{ fontFamily: "var(--font-display)", fontSize: 16, fontWeight: 700 }}>Custom duration</div>
+                  <button
+                    style={{ background: "none", border: "none", color: "var(--grey)", cursor: "pointer" }}
+                    onClick={() => setShowCustomDialog(false)}
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                  {[
+                    { label: "Days", value: dialogDays, setValue: setDialogDays, max: 5 },
+                    { label: "Hours", value: dialogHours, setValue: setDialogHours, max: 23 },
+                    { label: "Minutes", value: dialogMinutes, setValue: setDialogMinutes, max: 59 },
+                  ].map(({ label, value, setValue, max }) => (
+                    <div key={label} style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: 12, color: "var(--grey)", marginBottom: 8 }}>{label}</div>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                        <button
+                          onClick={() => setValue(Math.max(0, value - 1))}
+                          style={{
+                            width: 32,
+                            height: 32,
+                            borderRadius: 10,
+                            border: "1px solid rgba(255,255,255,0.12)",
+                            background: "transparent",
+                            color: "var(--grey)",
+                            cursor: value > 0 ? "pointer" : "not-allowed",
+                          }}
+                          disabled={value <= 0}
+                        >
+                          −
+                        </button>
+                        <div style={{ minWidth: 34, textAlign: "center", fontFamily: "var(--font-mono)", fontSize: 14, color: "var(--white)" }}>
+                          {value}
+                        </div>
+                        <button
+                          onClick={() => setValue(Math.min(max, value + 1))}
+                          style={{
+                            width: 32,
+                            height: 32,
+                            borderRadius: 10,
+                            border: "1px solid rgba(255,255,255,0.12)",
+                            background: "transparent",
+                            color: "var(--grey)",
+                            cursor: value < max ? "pointer" : "not-allowed",
+                          }}
+                          disabled={value >= max}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 18 }}>
+                  <button
+                    className="btn-secondary"
+                    onClick={() => setShowCustomDialog(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="btn-primary"
+                    onClick={() => {
+                      const totalMinutes = dialogDays * 24 * 60 + dialogHours * 60 + dialogMinutes;
+                      if (totalMinutes < 1) {
+                        alert("Duration must be at least 1 minute");
+                        return;
+                      }
+                      setCustomMinutes(totalMinutes);
+                      setDuration("custom");
+                      setShowCustomDialog(false);
+                    }}
+                  >
+                    Set
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {duration === "custom" && !showCustomDialog && (
             <div style={{ marginTop: 12 }}>
-              <input
-                className="input-field"
-                placeholder="minutes"
-                value={customTime}
-                onChange={e => setCustomTime(e.target.value)}
-              />
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--grey)" }}>
+                Custom: {formatDuration(customMinutes)}
+              </div>
             </div>
           )}
         </div>

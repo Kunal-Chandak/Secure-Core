@@ -4,7 +4,7 @@ import Icon from "../components/Icon";
 import { LogoMark, DeviceId } from "../components/SharedComponents";
 import { useAppContext } from "../context/AppContext";
 import { loadRecentRooms } from "../utils/recentRooms";
-import { getRoomInfo } from "../api";
+import { getRoomInfo, preWarmServer } from "../api";
 
 const Toast = ({ message, show }) => {
   if (typeof document === "undefined") return null;
@@ -148,6 +148,13 @@ const HomeScreen = ({ navigate }) => {
   useEffect(() => {
     const t = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    // Warm up the backend (helps keep server responsive on cold starts)
+    preWarmServer().catch(() => {
+      // Ignored; this is just a warm-up ping.
+    });
   }, []);
 
   useEffect(() => {

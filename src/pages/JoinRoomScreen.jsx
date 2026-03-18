@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import jsQR from "jsqr/dist/jsQR";
 import Icon from "../components/Icon";
 import { joinRoom } from "../api";
@@ -62,7 +62,7 @@ const JoinRoomScreen = ({ navigate }) => {
     return digitsOnly;
   };
 
-  const joinWithCode = useCallback(async (code) => {
+  const joinWithCode = async (code) => {
     const digitsOnly = setDigitsFromCode(code);
     if (!digitsOnly) return;
 
@@ -87,41 +87,32 @@ const JoinRoomScreen = ({ navigate }) => {
     } finally {
       setJoining(false);
     }
-  }, [navigate, setRoom]);
+  };
 
 
   const handleUpload = async (file) => {
     if (!file) return;
+
     try {
-      const dataUrl = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-
-      const img = new Image();
-      img.src = dataUrl;
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
-      });
-
+      // Use createImageBitmap for faster, more reliable image decoding (esp. large images)
+      const bitmap = await createImageBitmap(file);
       const canvas = document.createElement("canvas");
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
       const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0);
+      ctx.drawImage(bitmap, 0, 0);
+      bitmap.close();
+
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const code = jsQR(imageData.data, imageData.width, imageData.height);
       if (code?.data) {
-        handleScannedCode(code.data);
+        joinWithCode(code.data);
       } else {
         alert("No QR code found in image.");
       }
     } catch (err) {
       console.error("QR upload error", err);
-      alert("Unable to read QR image.");
+      alert("Unable to read QR image: " + (err?.message || err));
     }
   };
   const handleJoin = async () => {

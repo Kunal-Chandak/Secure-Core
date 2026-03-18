@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import Icon from "../components/Icon";
 import { QRCode } from "../components/SharedComponents";
 import { useAppContext } from "../context/AppContext";
+import { downloadFileDropWithProgress } from "../api";
+import { deriveDropKey, decryptBufferRaw } from "../utils/crypto";
 
 const fmtExpiry = (s) => {
   const h = Math.floor(s / 3600);
@@ -12,6 +14,11 @@ const fmtExpiry = (s) => {
 const FileReadyScreen = ({ navigate }) => {
   const { drop } = useAppContext();
   const [seconds, setSeconds] = useState(0);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [downloadStatus, setDownloadStatus] = useState("");
+  const [downloading, setDownloading] = useState(false);
+  const [downloaded, setDownloaded] = useState(false);
+  const [downloadError, setDownloadError] = useState(null);
 
   useEffect(() => {
     if (!drop?.expiryTimestamp) {
@@ -35,6 +42,54 @@ const FileReadyScreen = ({ navigate }) => {
     const t = setInterval(update, 1000);
     return () => clearInterval(t);
   }, [drop, navigate]);
+
+  useEffect(() => {
+    const shouldDownload = drop?.isReceiver && drop?.fileId && drop?.dropHash && drop?.code && drop?.iv && drop?.authTag;
+    if (!shouldDownload) return;
+
+    const downloadAndDecrypt = async () => {
+      setDownloading(true);
+      setDownloadError(null);
+      setDownloadStatus("Downloading encrypted file...");
+      setDownloadProgress(0);
+
+      try {
+        const key = await deriveDropKey(drop.code);
+
+        const { arrayBuffer } = await downloadFileDropWithProgress(
+          drop.fileId,
+          drop.dropHash,
+          (p) => setDownloadProgress(p),
+        );
+
+        setDownloadStatus("Decrypting file...");
+
+        const ciphertext = new Uint8Array(arrayBuffer);
+        const plaintext = await decryptBufferRaw(key, ciphertext, drop.iv, drop.authTag);
+
+        const blob = new Blob([plaintext], { type: "application/octet-stream" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = drop.fileName || "secure_file";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        setDownloadStatus("Download complete! Check your downloads folder.");
+        setDownloaded(true);
+      } catch (err) {
+        console.error("Download/decrypt error", err);
+        setDownloadError(err?.message || String(err));
+        setDownloadStatus("Download failed. Please try again.");
+      } finally {
+        setDownloading(false);
+      }
+    };
+
+    downloadAndDecrypt();
+  }, [drop]);
 
 
   return (
@@ -127,6 +182,31 @@ const FileReadyScreen = ({ navigate }) => {
           </div>
         </div>
 
+        {drop?.isReceiver && (
+          <div className="card card-glow" style={{ padding: 20, marginBottom: 20, textAlign: "left" }}>
+            <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 15, marginBottom: 8 }}>
+              Download Status
+            </div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--grey)", marginBottom: 12 }}>
+              {downloadStatus || "Preparing download..."}
+            </div>
+            {downloading && (
+              <div className="progress-bar" style={{ marginBottom: 12 }}>
+                <div style={{ width: `${Math.round(downloadProgress * 100)}%` }} />
+              </div>
+            )}
+            {downloadError && (
+              <div style={{ color: "var(--red)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                Error: {downloadError}
+              </div>
+            )}
+            {downloaded && (
+              <div style={{ color: "var(--green)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                File downloaded to your device.
+              </div>
+            )}
+          </div>
+        )}
 
         <button className="btn-secondary" onClick={() => navigate("home")}>
           <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>

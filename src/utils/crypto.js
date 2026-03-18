@@ -116,6 +116,16 @@ export async function deriveRoomKey(code, saltBase64) {
 }
 
 /**
+ * Derive the file-drop encryption key based on the 6-digit drop code.
+ * This matches the Flutter implementation, which derives AES-GCM key from PBKDF2
+ * using the drop code bytes as both the password and salt.
+ */
+export async function deriveDropKey(code) {
+  const salt = bytesToBase64(new TextEncoder().encode(code));
+  return deriveRoomKey(code, salt);
+}
+
+/**
  * Encrypt a plaintext string using AES-GCM and return base64 parts.
  */
 export async function encryptMessage(key, plaintext) {
